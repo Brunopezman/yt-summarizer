@@ -3,7 +3,7 @@
 - id: obs-002
 - subtarea: cli-resumir
 - severidad: no-bloqueante
-- estado: abierta
+- estado: aceptada
 
 ## Descripción
 
@@ -34,3 +34,18 @@ stdout), mover el `print(resumen)` después del bloque `if output is not None`,
 para que un exit 1 por fallo de escritura no deje salida de negocio en stdout.
 Evaluar si vale la pena antes de decidir; para uso con pipe el orden actual es
 defendible.
+
+## Resolución
+
+Cerrada en reintento de mejora. En `yt_summarizer/cli.py`, `resumir`, se
+reordenó la salida (paso 4): primero se persiste el archivo (`--output`) y
+recién después se imprime el resumen a stdout. La confirmación "Resumen
+guardado en ..." sigue yendo a stderr y el resumen sigue siendo la única
+salida de negocio de stdout. Un fallo de escritura ahora termina con exit 1 y
+`stdout=""`.
+
+Verificación manual: `resumir <url> --output /ruta/que/no/existe/out.txt` con
+key válida y transcripción/LLM OK → `exit_code=1`, `stdout=""` (sin salida de
+negocio consumida por el pipe), stderr = "Error: No se pudo escribir el
+resumen en ...", sin traceback. Los tests existentes de `--output` siguen
+verdes sin cambios.

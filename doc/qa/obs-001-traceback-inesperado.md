@@ -3,7 +3,7 @@
 - id: obs-001
 - subtarea: cli-resumir
 - severidad: no-bloqueante
-- estado: abierta
+- estado: aceptada
 
 ## Descripción
 
@@ -34,3 +34,17 @@ los tres `except` de contrato) que llame `_fail("Error inesperado: ...")`, o
 mejor, hacer que la capa de negocio envuelva siempre sus errores en los tipos
 del contrato. No es urgente: requiere un bug real en la capa de negocio para
 dispararse.
+
+## Resolución
+
+Cerrada en reintento de mejora. En `yt_summarizer/cli.py`, `resumir`, se agregó
+un `except Exception` final (después de `except TranscriptError` /
+`except LLMProviderError`) en el bloque de negocio (líneas 270-278) que
+traduce cualquier excepción inesperada de la capa de negocio a un mensaje
+claro en español a stderr con exit code 1 y sin traceback crudo, incluyendo el
+detalle de la excepción de forma breve en el mensaje para poder debuggear.
+
+Verificación manual: `get_transcript` mockeado lanzando `ValueError` →
+`exit_code=1`, stderr = "Error inesperado al procesar el video 'dQw4w9WgXcQ':
+id malformado internamente: 1234. ...", `stdout=""`, sin "Traceback" en stderr,
+`result.exception` es `SystemExit` (mecanismo normal de exit de Typer).

@@ -267,10 +267,21 @@ def resumir(
         _fail(str(exc))
     except LLMProviderError as exc:
         _fail(str(exc))
+    except Exception as exc:  # pragma: no cover - red de seguridad ante bugs
+        # Fallback de robustez: cualquier excepción inesperada de la capa de
+        # negocio (p. ej. ValueError, TypeError) se traduce a un mensaje claro
+        # en español con exit code 1, sin traceback crudo. El detalle de la
+        # excepción se incluye breve en el mensaje para poder debuggear.
+        _fail(
+            f"Error inesperado al procesar el video '{video_id}': {exc}. "
+            "Si el problema persiste, revisá el reporte del error o abrí un "
+            "issue con el comando completo."
+        )
 
     # 4) Salida: el resumen es la única salida de negocio → stdout.
-    print(resumen)
-
+    #    Primero se persiste el archivo (si --output) y recién después se
+    #    imprime a stdout: así un exit 1 por fallo de escritura no deja
+    #    salida de negocio consumida por el pipe.
     if output is not None:
         try:
             output.write_text(resumen + "\n", encoding="utf-8")
@@ -282,6 +293,8 @@ def resumir(
             "Usá --output <archivo> para guardar el resumen en un archivo.",
             err=True,
         )
+
+    print(resumen)
 
 
 if __name__ == "__main__":

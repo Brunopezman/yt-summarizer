@@ -427,6 +427,64 @@ def test_resumir_transcripcion_vacia_error_llm_exit_1(cli_basica, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Caso límite 5: excepción inesperada de la capa de negocio → exit 1, mensaje
+# claro en español a stderr, sin traceback, stdout vacío (obs-001)
+# ---------------------------------------------------------------------------
+
+
+def test_resumir_excepcion_inesperada_negocio_exit_1_sin_traceback(
+    cli_basica, monkeypatch
+):
+    # Una excepción fuera del contrato (p. ej. ValueError) que escape de
+    # get_transcript no debe llegar como traceback crudo: la red de seguridad
+    # del CLI la traduce a un mensaje claro en español con exit code 1.
+    def _valor_error(video_id, lang="es"):
+        raise ValueError("id malformado internamente: 1234")
+
+    monkeypatch.setattr(cli_module, "get_transcript", _valor_error)
+
+    result = cli_basica.invoke(app, ["resumir", VIDEO_URL], env=ENV_OPENAI_OK)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Error inesperado al procesar el video" in result.stderr
+    assert VIDEO_ID in result.stderr
+    # El detalle de la excepción se incluye breve en el mensaje para debuggear.
+    assert "id malformado internamente: 1234" in result.stderr
+    # Sin traceback crudo: solo el mensaje claro y el exit normal de Typer.
+    assert "Traceback" not in result.stderr
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
+
+
+@pytest.mark.parametrize(
+    ("excepcion", "codigo_esperado"),
+    [
+        # SystemExit: mecanismo normal de salida de Typer, no se re-traduce.
+        (SystemExit(3), 3),
+        # KeyboardInterrupt: Ctrl+C, se propaga (exit 130 por convención).
+        (KeyboardInterrupt(), 130),
+    ],
+)
+def test_resumir_base_exception_negocio_no_es_tragada_por_red_de_seguridad(
+    cli_basica, monkeypatch, excepcion, codigo_esperado
+):
+    # La red de seguridad es `except Exception`: SystemExit/KeyboardInterrupt
+    # heredan de BaseException y deben propagar sin ser traducidos a
+    # "Error inesperado" (declarado en obs-001).
+    def _lanza(video_id, lang="es"):
+        raise excepcion
+
+    monkeypatch.setattr(cli_module, "get_transcript", _lanza)
+
+    result = cli_basica.invoke(app, ["resumir", VIDEO_URL], env=ENV_OPENAI_OK)
+
+    assert result.exit_code == codigo_esperado
+    assert "Error inesperado al procesar el video" not in result.stderr
+    assert result.stdout == ""
+
+
+# ---------------------------------------------------------------------------
 # Errores de escritura de --output → exit 1, sin traceback
 # ---------------------------------------------------------------------------
 
@@ -447,6 +505,9 @@ def test_resumir_output_no_escribible_exit_1(cli_basica, monkeypatch):
     assert result.exit_code == 1
     assert "No se pudo escribir el resumen" in result.stderr
     assert isinstance(result.exception, SystemExit)
+    # obs-002: el resumen se persiste ANTES de imprimirse a stdout, así un
+    # fallo de escritura no deja salida de negocio consumida por el pipe.
+    assert result.stdout == ""
 
 
 # ---------------------------------------------------------------------------
