@@ -24,20 +24,53 @@ git clone <repo-url>
 cd yt-summarizer
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 cp .env.example .env  # completar con tu API key
+```
+
+Dependencias opcionales por proveedor LLM:
+
+```bash
+pip install -e ".[openai]"   # SDK de OpenAI
+pip install -e ".[gemini]"   # SDK de Google Gemini
 ```
 
 ## Uso
 
+El paquete se invoca como subcomando (`yt-summarizer resumir <url>`) o como
+módulo:
+
 ```bash
-python -m yt_summarizer resumir "https://www.youtube.com/watch?v=VIDEO_ID"
+yt-summarizer resumir "https://www.youtube.com/watch?v=VIDEO_ID"
+python -m yt_summarizer resumir "URL"  # equivalente
+python -m yt_summarizer.cli resumir "URL"
 
 # opciones
-python -m yt_summarizer resumir "URL" --idioma es --largo corto
-python -m yt_summarizer resumir "URL" --output resumen.md
-python -m yt_summarizer resumir "URL" --proveedor gemini
+yt-summarizer resumir "URL" --idioma es --largo corto
+yt-summarizer resumir "URL" --output resumen.md
+yt-summarizer resumir "URL" --proveedor gemini
 ```
+
+### Flags del comando `resumir`
+
+| Flag | Default | Descripción |
+|---|---|---|
+| `--idioma, -i` | `es` | Idioma de la transcripción (código ISO 639-1, ej. `es`, `en`) |
+| `--largo, -l` | `medio` | Nivel de detalle del resumen: `corto`, `medio` o `extenso` |
+| `--output, -o` | — | Guarda el resumen en un archivo, además de mostrarlo |
+| `--proveedor, -p` | el de `LLM_PROVIDER` | Proveedor LLM: `openai` o `gemini` |
+
+La URL puede ser de cualquier formato de YouTube: `watch?v=`, `youtu.be/`,
+`/shorts/`, `/embed/`, `/live/`, con o sin query params, o directamente un ID
+de 11 caracteres.
+
+### Salida y exit codes
+
+- El resumen va a **stdout** (pipeable: `yt-summarizer resumir URL > resumen.txt`);
+  el progreso, las confirmaciones y los errores van a **stderr**.
+- Errores de uso (URL o flag inválido) → exit code `2`.
+- Errores de negocio o configuración (transcripción, LLM, API keys) → exit
+  code `1`, siempre con un mensaje claro en español y sin traceback.
 
 ## Configuración
 

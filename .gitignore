@@ -2,3 +2,6 @@
 !.agent-state/TEMPLATE.md
 __pycache__/
 *.pyc
+*.egg-info/
+.env
+.venv/

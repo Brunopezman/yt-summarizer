@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-summarizer"
+version = "0.1.0"
+description = "Descarga la transcripción de un video de YouTube y genera un resumen con IA (OpenAI o Gemini)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "typer>=0.9",
+    "python-dotenv>=1.0",
+    "youtube-transcript-api>=1.2",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+gemini = ["google-generativeai>=0.7"]
+
+[project.scripts]
+yt-summarizer = "yt_summarizer.cli:app"
+
+[tool.setuptools]
+packages = ["yt_summarizer"]
