@@ -1,0 +1,2 @@
+transcript-get_transcript | intento 1 | entregado | integration-dev implementó get_transcript con TranscriptNotFoundError/TranscriptsDisabledError
+transcript-get_transcript | intento 1 | ok | 18/18 tests verdes en tests/test_transcript.py, 3 casos limite cubiertos
