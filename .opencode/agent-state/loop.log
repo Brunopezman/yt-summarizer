@@ -1,8 +1,0 @@
-transcript-get_transcript | intento 1 | entregado | integration-dev implementó get_transcript con TranscriptNotFoundError/TranscriptsDisabledError
-transcript-get_transcript | intento 1 | ok | 18/18 tests verdes en tests/test_transcript.py, 3 casos limite cubiertos
-summarizer-summarize | intento 1 | entregado | integration-dev implemento Summarizer.summarize con LLMProviderError/LLMRateLimitError y factory por LLM_PROVIDER
-summarizer-summarize | intento 1 | ok | 44/44 tests verdes en tests/test_summarizer.py, 18/18 transcript sin regresiones (62 total)
-cli-resumir | intento 1 | entregado | cli-dev implemento comando resumir con config.py, exit codes 1/2, stderr para errores
-cli-resumir | intento 1 | ok | 41/41 tests verdes en tests/test_cli.py, 103 total sin regresiones
-cli-fix-observaciones | intento 1 | entregado | cli-dev arreglo obs-001 (except Exception) y obs-002 (write antes de print)
-cli-fix-observaciones | intento 1 | ok | 44/44 cli (106 total), obs-001/002 resueltas con tests permanentes
