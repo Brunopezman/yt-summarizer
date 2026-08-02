@@ -1,2 +1,4 @@
 transcript-get_transcript | intento 1 | entregado | integration-dev implementó get_transcript con TranscriptNotFoundError/TranscriptsDisabledError
 transcript-get_transcript | intento 1 | ok | 18/18 tests verdes en tests/test_transcript.py, 3 casos limite cubiertos
+summarizer-summarize | intento 1 | entregado | integration-dev implemento Summarizer.summarize con LLMProviderError/LLMRateLimitError y factory por LLM_PROVIDER
+summarizer-summarize | intento 1 | ok | 44/44 tests verdes en tests/test_summarizer.py, 18/18 transcript sin regresiones (62 total)
