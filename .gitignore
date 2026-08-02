@@ -1,0 +1,2 @@
+.agent-state/*
+!.agent-state/TEMPLATE.md
