@@ -1,7 +1,7 @@
 """Tests de la capa de resumen (`yt_summarizer.summarizer`).
 
 Nunca se pega a APIs reales ni se requiere que los SDKs (``openai``,
-``google-generativeai``) estén instalados: el módulo los importa de forma
+``google-genai``) estén instalados: el módulo los importa de forma
 diferida, así que los tests instalan SDKs falsos en ``sys.modules`` para
 verificar la traducción de excepciones crudas a la jerarquía propia
 (``LLMProviderError`` / ``LLMRateLimitError``), y parchean
@@ -11,8 +11,8 @@ comportamiento de ``summarize()``.
 Casos límite del contrato cubiertos acá:
 
 1. Rate limit simulado (mock) -> ``LLMRateLimitError`` (nunca
-   ``LLMProviderError`` genérico), para ambos proveedores — incluye el caso
-   Gemini de ``RetryError`` con causa ``ResourceExhausted``.
+   ``LLMProviderError`` genérico), para ambos proveedores — en Gemini, el 429
+   llega como ``ClientError`` con ``code == 429``.
 2. Proveedor mal configurado (falta API key) -> ``LLMProviderError`` con el
    nombre exacto de la variable faltante.
 3. Texto vacío -> ``LLMProviderError`` (decisión de integración, fail-fast).
@@ -40,7 +40,7 @@ from yt_summarizer.summarizer import (
 )
 
 # ---------------------------------------------------------------------------
-# SDKs falsos: jerarquías que imitan a openai / google.api_core
+# SDKs falsos: jerarquías que imitan a openai / google.genai / httpx
 # ---------------------------------------------------------------------------
 
 
@@ -56,28 +56,32 @@ class _FakeAPITimeoutError(_FakeOpenAIError):
     """Como `openai.APITimeoutError`."""
 
 
-class _FakeGoogleAPICallError(Exception):
-    """Base de los errores de google.api_core (como `GoogleAPICallError`)."""
+class _FakeGenAIError(Exception):
+    """Base de los errores de `google.genai.errors` (como `APIError`)."""
+
+    def __init__(self, code, message):
+        super().__init__(f"{code} {message}".strip())
+        self.code = code
 
 
-class _FakeResourceExhausted(_FakeGoogleAPICallError):
-    """Como `google.api_core.exceptions.ResourceExhausted` (cuota/rate limit)."""
+class _FakeClientError(_FakeGenAIError):
+    """Como `google.genai.errors.ClientError` (errores 4xx)."""
 
 
-class _FakeDeadlineExceeded(_FakeGoogleAPICallError):
-    """Como `google.api_core.exceptions.DeadlineExceeded` (timeout)."""
+class _FakeServerError(_FakeGenAIError):
+    """Como `google.genai.errors.ServerError` (errores 5xx)."""
 
 
-class _FakeRetryError(_FakeGoogleAPICallError):
-    """Como `google.api_core.exceptions.RetryError`, con atributo `cause`."""
+class _FakeHTTPError(Exception):
+    """Base de los errores de transporte de httpx (como `httpx.HTTPError`)."""
 
-    def __init__(self, *args, cause=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cause = cause
+
+class _FakeTimeoutError(_FakeHTTPError):
+    """Como `httpx.TimeoutException` (timeout de red)."""
 
 
 class _FakeGenAIResponse:
-    """Simula la respuesta de `genai.GenerativeModel.generate_content`."""
+    """Simula la respuesta de `client.models.generate_content`."""
 
     def __init__(self, text, raise_on_text=False):
         self._text = text
@@ -160,12 +164,13 @@ def fake_openai_sdk(monkeypatch):
 
 @pytest.fixture
 def fake_gemini_sdk(monkeypatch):
-    """Instala SDKs de Google falsos (``google.generativeai`` y
-    ``google.api_core.exceptions``) en ``sys.modules``.
+    """Instala SDKs de Google falsos (``google.genai``, ``google.genai.errors``
+    y ``httpx``) en ``sys.modules``.
 
     Devuelve un objeto de estado configurable desde el test:
 
-    - ``state.error``: excepción cruda a lanzar en ``generate_content``.
+    - ``state.error``: excepción cruda a lanzar en
+      ``client.models.generate_content``.
     - ``state.response_text``: texto a devolver (``None``/``""`` = vacío).
     - ``state.raise_on_text``: si ``True``, acceder a ``.text`` lanza
       ``ValueError`` (respuesta bloqueada por safety settings).
@@ -184,33 +189,39 @@ def fake_gemini_sdk(monkeypatch):
 
     state = State()
 
-    class FakeModel:
-        def generate_content(self, prompt):
-            state.prompts.append(prompt)
+    class FakeModels:
+        def generate_content(self, *, model, contents, **kwargs):
+            state.prompts.append(contents)
+            state.models.append(model)
             if state.error is not None:
                 raise state.error
             return _FakeGenAIResponse(state.response_text, state.raise_on_text)
 
-    genai = _module("google.generativeai")
-    genai.configure = lambda api_key=None: state.configured_keys.append(api_key)
-    genai.GenerativeModel = lambda model: (state.models.append(model) or FakeModel())
+    class FakeGenAIClient:
+        def __init__(self, *, api_key=None, **kwargs):
+            state.configured_keys.append(api_key)
+            self.models = FakeModels()
 
-    exceptions = _module("google.api_core.exceptions")
-    exceptions.ResourceExhausted = _FakeResourceExhausted
-    exceptions.DeadlineExceeded = _FakeDeadlineExceeded
-    exceptions.RetryError = _FakeRetryError
-    exceptions.GoogleAPICallError = _FakeGoogleAPICallError
+    genai = _module("google.genai")
+    genai.Client = FakeGenAIClient
+
+    errors = _module("google.genai.errors")
+    errors.APIError = _FakeGenAIError
+    errors.ClientError = _FakeClientError
+    errors.ServerError = _FakeServerError
+    genai.errors = errors
+
+    httpx = _module("httpx")
+    httpx.TimeoutException = _FakeTimeoutError
+    httpx.HTTPError = _FakeHTTPError
 
     google_pkg = _module("google")
-    google_pkg.generativeai = genai
-    api_core = _module("google.api_core")
-    api_core.exceptions = exceptions
-    google_pkg.api_core = api_core
+    google_pkg.genai = genai
 
     monkeypatch.setitem(sys.modules, "google", google_pkg)
-    monkeypatch.setitem(sys.modules, "google.generativeai", genai)
-    monkeypatch.setitem(sys.modules, "google.api_core", api_core)
-    monkeypatch.setitem(sys.modules, "google.api_core.exceptions", exceptions)
+    monkeypatch.setitem(sys.modules, "google.genai", genai)
+    monkeypatch.setitem(sys.modules, "google.genai.errors", errors)
+    monkeypatch.setitem(sys.modules, "httpx", httpx)
     return state
 
 
@@ -252,7 +263,7 @@ def recorder_gemini(monkeypatch):
 
 def test_modulo_se_importa_sin_sdks_instalados():
     # El import tolerante es parte del contrato: el módulo importa aunque
-    # openai/google-generativeai no estén instalados (import diferido del SDK).
+    # openai/google-genai no estén instalados (import diferido del SDK).
     modulo = importlib.import_module("yt_summarizer.summarizer")
     assert hasattr(modulo, "get_summarizer")
 
@@ -456,11 +467,11 @@ def test_call_openai_rate_limit_lanza_llm_rate_limit_error(
     assert isinstance(exc.value, LLMProviderError)  # jerarquía respetada
 
 
-def test_call_gemini_resource_exhausted_lanza_llm_rate_limit_error(
+def test_call_gemini_client_error_429_lanza_llm_rate_limit_error(
     monkeypatch, fake_gemini_sdk
 ):
     monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
-    fake_gemini_sdk.error = _FakeResourceExhausted("quota agotada")
+    fake_gemini_sdk.error = _FakeClientError(429, "quota agotada")
 
     with pytest.raises(LLMRateLimitError) as exc:
         _call_gemini("prompt")
@@ -468,32 +479,19 @@ def test_call_gemini_resource_exhausted_lanza_llm_rate_limit_error(
     assert type(exc.value) is LLMRateLimitError
 
 
-def test_call_gemini_retry_error_con_causa_resource_exhausted_lanza_rate_limit(
+def test_call_gemini_client_error_no_429_lanza_llm_provider_error(
     monkeypatch, fake_gemini_sdk
 ):
+    # Errores 4xx que no son 429 (API key inválida, modelo inexistente, etc.)
+    # NO se degradan a rate limit: son errores del proveedor.
     monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
-    fake_gemini_sdk.error = _FakeRetryError(
-        "reintentos fallidos", cause=_FakeResourceExhausted("429")
-    )
-
-    with pytest.raises(LLMRateLimitError) as exc:
-        _call_gemini("prompt")
-
-    assert type(exc.value) is LLMRateLimitError
-
-
-def test_call_gemini_retry_error_sin_causa_rate_limit_lanza_llm_provider_error(
-    monkeypatch, fake_gemini_sdk
-):
-    monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
-    fake_gemini_sdk.error = _FakeRetryError(
-        "reintentos fallidos", cause=_FakeGoogleAPICallError("500 interno")
-    )
+    fake_gemini_sdk.error = _FakeClientError(403, "forbidden")
 
     with pytest.raises(LLMProviderError) as exc:
         _call_gemini("prompt")
 
     assert not isinstance(exc.value, LLMRateLimitError)
+    assert "proveedor Gemini" in str(exc.value)
 
 
 def test_summarize_openai_propaga_llm_rate_limit_error_sin_degradar(monkeypatch):
@@ -528,11 +526,11 @@ def test_call_openai_timeout_lanza_llm_provider_error_no_rate_limit(
     assert "timeout" in str(exc.value).lower()
 
 
-def test_call_gemini_deadline_exceeded_lanza_llm_provider_error_no_rate_limit(
+def test_call_gemini_timeout_lanza_llm_provider_error_no_rate_limit(
     monkeypatch, fake_gemini_sdk
 ):
     monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
-    fake_gemini_sdk.error = _FakeDeadlineExceeded("deadline exceeded")
+    fake_gemini_sdk.error = _FakeTimeoutError("request timed out")
 
     with pytest.raises(LLMProviderError) as exc:
         _call_gemini("prompt")
@@ -675,7 +673,7 @@ def test_call_gemini_error_generico_lanza_llm_provider_error(
     monkeypatch, fake_gemini_sdk
 ):
     monkeypatch.setenv("GEMINI_API_KEY", "gem-test")
-    fake_gemini_sdk.error = _FakeGoogleAPICallError("500 interno")
+    fake_gemini_sdk.error = _FakeServerError(500, "interno")
 
     with pytest.raises(LLMProviderError) as exc:
         _call_gemini("prompt")
@@ -724,5 +722,5 @@ def test_call_gemini_envia_prompt_y_usa_modelo_por_defecto(
 
     assert resultado == "Resumen gemini"
     assert fake_gemini_sdk.configured_keys == ["gem-test"]
-    assert fake_gemini_sdk.models == ["gemini-1.5-flash"]
+    assert fake_gemini_sdk.models == ["gemini-2.0-flash"]
     assert fake_gemini_sdk.prompts == ["prompt de prueba"]

@@ -12,7 +12,7 @@ Los errores propios de esta capa se agrupan bajo :class:`LLMProviderError`:
   :class:`LLMProviderError`, así que el llamador puede capturar todos los
   fallos de la capa con un solo ``except LLMProviderError``.
 
-Las excepciones crudas de los SDKs (``openai``, ``google-generativeai``)
+Las excepciones crudas de los SDKs (``openai``, ``google-genai``)
 nunca se propagan al llamador: se traducen dentro de ``_call_openai()`` y
 ``_call_gemini()`` a estas excepciones propias y tipadas.
 
@@ -236,10 +236,10 @@ class OpenAISummarizer(Summarizer):
 
 @_register
 class GeminiSummarizer(Summarizer):
-    """Resúmenes vía la API de Google Gemini (google-generativeai).
+    """Resúmenes vía la API de Google Gemini (google-genai).
 
     La API key se lee de ``GEMINI_API_KEY`` y el modelo de ``GEMINI_MODEL``
-    (default ``gemini-1.5-flash``) en el momento de la llamada.
+    (default ``gemini-2.0-flash``) en el momento de la llamada.
 
     Para testear sin llamar a la API real, parcheá la función de módulo
     ``yt_summarizer.summarizer._call_gemini``.
@@ -371,8 +371,8 @@ def _call_gemini(prompt: str) -> str:
         LLMProviderError: si falta ``GEMINI_API_KEY``, si el SDK no está
             instalado, si hay timeout/fallo de red, o si la respuesta es
             vacía.
-        LLMRateLimitError: si Gemini responde con ``ResourceExhausted``
-            (incluso como causa interna de un ``RetryError``).
+        LLMRateLimitError: si Gemini responde con rate limit (HTTP 429, que el
+            SDK expone como ``ClientError`` con ``code == 429``).
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -381,36 +381,40 @@ def _call_gemini(prompt: str) -> str:
             "Configurala para usar el proveedor Gemini."
         )
     try:
-        from google import generativeai as genai
-        from google.api_core import exceptions as api_exceptions
+        from google import genai
+        from google.genai import errors as genai_errors
+        import httpx
     except ImportError as exc:
         raise LLMProviderError(
             "El SDK de Google Gemini no está instalado. Instalalo con "
-            "'pip install google-generativeai' o elegí otro proveedor con "
+            "'pip install google-genai' o elegí otro proveedor con "
             "LLM_PROVIDER."
         ) from exc
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+            contents=prompt,
         )
-        response = model.generate_content(prompt)
-    except api_exceptions.ResourceExhausted as exc:
-        # Rate limit / cuota agotada: nunca degradar a LLMProviderError.
-        raise LLMRateLimitError(f"Rate limit de la API de Gemini: {exc}") from exc
-    except api_exceptions.RetryError as exc:
-        # Los reintentos del SDK fallaron; si la causa es rate limit, tiparla
-        # como tal (cubre cuotas que llegan vía retry interno).
-        causa = getattr(exc, "cause", None)
-        if isinstance(causa, api_exceptions.ResourceExhausted):
+    except genai_errors.ClientError as exc:
+        # Errores 4xx. El 429 es rate limit/cuota: nunca degradar a
+        # LLMProviderError. El resto (API key inválida, modelo inexistente,
+        # etc.) es un error del proveedor.
+        if exc.code == 429:
             raise LLMRateLimitError(f"Rate limit de la API de Gemini: {exc}") from exc
         raise LLMProviderError(f"Error del proveedor Gemini: {exc}") from exc
-    except api_exceptions.DeadlineExceeded as exc:
-        raise LLMProviderError(f"Timeout al consultar la API de Gemini: {exc}") from exc
-    except api_exceptions.GoogleAPICallError as exc:
-        # PermissionDenied (API key inválida), InternalServerError, etc.
+    except genai_errors.ServerError as exc:
+        # Errores 5xx del lado de Google.
         raise LLMProviderError(f"Error del proveedor Gemini: {exc}") from exc
+    except genai_errors.APIError as exc:
+        # Cualquier otro error tipado por el SDK de Google.
+        raise LLMProviderError(f"Error del proveedor Gemini: {exc}") from exc
+    except httpx.TimeoutException as exc:
+        raise LLMProviderError(f"Timeout al consultar la API de Gemini: {exc}") from exc
+    except httpx.HTTPError as exc:
+        # Fallo de red/transporte (connect, dns, etc.), no de la API en sí.
+        raise LLMProviderError(f"Error de red al consultar la API de Gemini: {exc}") from exc
 
     try:
         text = response.text
