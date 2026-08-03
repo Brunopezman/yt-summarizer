@@ -19,11 +19,15 @@ Herramienta de línea de comandos que descarga la transcripción de un video de 
 
 ## Instalación
 
+> En Debian/Ubuntu, el comando `python` no existe por defecto (solo `python3`) y
+> puede faltar el paquete `python3-venv`. Si `python3 -m venv` falla, instalalo
+> con `sudo apt-get install -y python3-venv`.
+
 ```bash
 git clone <repo-url>
 cd yt-summarizer
-python -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 cp .env.example .env  # completar con tu API key
 ```
@@ -88,24 +92,24 @@ Variables de entorno (`.env`):
 yt-summarizer/
 ├── yt_summarizer/
 │   ├── __init__.py
+│   ├── __main__.py     # python -m yt_summarizer
 │   ├── cli.py          # comandos Typer
 │   ├── transcript.py   # descarga y limpieza de transcripción
 │   ├── summarizer.py   # abstracción de proveedor LLM (OpenAI/Gemini)
 │   └── config.py       # carga de variables de entorno
 ├── tests/
-├── requirements.txt
 ├── .env.example
 └── README.md
 ```
 
 ## Roadmap
 
-- [ ] CLI básica con Typer (extracción + resumen)
-- [ ] Soporte multi-proveedor LLM (OpenAI / Gemini)
+- [x] CLI básica con Typer (extracción + resumen)
+- [x] Soporte multi-proveedor LLM (OpenAI / Gemini)
 - [ ] Manejo de videos sin transcripción disponible
-- [ ] Resúmenes con distintos niveles de detalle (corto / extenso / bullet points)
+- [x] Resúmenes con distintos niveles de detalle (corto / extenso / bullet points)
 - [ ] Interfaz web opcional con Streamlit
-- [ ] Tests unitarios
+- [x] Tests unitarios
 
 ## Licencia
 
